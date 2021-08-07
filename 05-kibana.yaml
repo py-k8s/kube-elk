@@ -1,0 +1,95 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: ns-elk
+  name: kibana-config
+  labels:
+    app: kibana
+data:
+  kibana.yml: |-
+    server.host: 0.0.0.0
+    elasticsearch:
+      hosts: ${ELASTICSEARCH_HOSTS}
+      username: ${ELASTICSEARCH_USER}
+      password: ${ELASTICSEARCH_PASSWORD}
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  labels:
+    app: kibana
+  name: kibana
+  namespace: ns-elk
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: kibana
+  template:
+    metadata:
+      labels:
+        app: kibana
+    spec:
+      containers:
+        - name: kibana
+          image: docker.elastic.co/kibana/kibana:7.14.0
+          ports:
+            - containerPort: 5601
+              protocol: TCP
+          env:
+            # elasticsearch.hosts ???
+            - name: ELASTICSEARCH_HOSTS
+              value: "http://elasticsearch-service:9200"
+            - name: ELASTICSEARCH_USER
+              value: "elastic"
+            - name: ELASTICSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: elasticsearch-password
+                  key: password
+            - name: xpack.encryptedSavedObjects.encryptionKey
+              value: "min-32-byte-long-strong-encryption-key"
+
+          volumeMounts:
+          - name: kibana-config
+            mountPath: /usr/share/kibana/config/kibana.yml
+            readOnly: true
+            subPath: kibana.yml
+          - mountPath: /etc/localtime
+            name: localtime
+      volumes:
+      - name: kibana-config
+        configMap:
+          name: kibana-config
+      - hostPath:
+          path: /etc/localtime
+        name: localtime
+
+      # imagePullSecrets:
+      # - name: 
+      tolerations:
+        - key: node-role.kubernetes.io/master
+          effect: NoSchedule
+---
+kind: Service
+apiVersion: v1
+metadata:
+  annotations:
+    service.beta.kubernetes.io/alibaba-cloud-loadbalancer-address-type: "intranet"
+    # alicloud-loadbalancer-id 更改为对应阿里云 SLB ID 
+    service.beta.kubernetes.io/alicloud-loadbalancer-id: "lb-wz96ujq51shspyxb5hpd7"
+    service.beta.kubernetes.io/alicloud-loadbalancer-force-override-listeners: "true"
+  labels:
+    app: kibana
+  name: kibana-service
+  namespace: ns-elk
+spec:
+  externalTrafficPolicy: Local
+  sessionAffinity: None
+  type: LoadBalancer
+  ports:
+    - port: 5601
+      targetPort: 5601
+  selector:
+    app: kibana
